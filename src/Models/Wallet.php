@@ -4,6 +4,7 @@ namespace HesamRad\LaravelWallet\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Wallet extends Model
 {
@@ -34,5 +35,15 @@ class Wallet extends Model
             'owner_id' => 'integer',
             'balance' => 'double',
         ];
+    }
+
+    /**
+     * Return the logs belonging to this wallet.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<Log, Wallet>
+     */
+    public function logs(): HasMany
+    {
+        return $this->hasMany(Log::class)->latest();
     }
 }
