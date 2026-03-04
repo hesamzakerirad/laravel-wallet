@@ -1,0 +1,45 @@
+{
+    "name": "hesamrad/laravel-wallet",
+    "description": "A minimalistic wallet for any Laravel application allowing logging and concurrency.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/hesamzakerirad/laravel-wallet",
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/database": "^10.0|^11.0|^12.0",
+        "illuminate/config": "^10.0|^11.0|^12.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0",
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "HesamRad\\LaravelWallet\\": "src/",
+            "HesamRad\\LaravelWallet\\Database\\Factories\\": "database/factories",
+            "HesamRad\\LaravelWallet\\Database\\Seeders\\": "database/seeders"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "HesamRad\\LaravelWallet\\Tests\\": "tests"
+        }
+    },
+    "authors": [
+        {
+            "name": "Hesam Rad",
+            "email": "hesamzakerirad@gmail.com",
+            "homepage": "https://hesamrad.com",
+            "role": "Developer"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [
+                "HesamRad\\LaravelWallet\\LaravelWalletServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable"
+}
