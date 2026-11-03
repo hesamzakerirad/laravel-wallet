@@ -45,11 +45,33 @@ trait InteractsWithWallet
      * Retrieve the current balance formatted as a localized string
      * including the currency symbol. (e.g., "$100.50").
      *
+     * Uses the `wallet.formatter` class when one is configured.
+     *
      * @return string
      */
     public function balanceToString(): string
     {
-        return (string)$this->currencySymbol() . $this->balance();
+        return $this->formatAmount($this->balance());
+    }
+
+    /**
+     * Format any amount the same way as balanceToString().
+     *
+     * Uses the `wallet.formatter` class when one is configured,
+     * otherwise prefixes the currency symbol (e.g., "$100.5").
+     *
+     * @param int|float $amount
+     * @return string
+     */
+    public function formatAmount(int|float $amount): string
+    {
+        $formatter = config('wallet.formatter');
+
+        if ($formatter) {
+            return (string)app($formatter)($amount, $this->currency());
+        }
+
+        return (string)$this->currencySymbol() . $amount;
     }
 
     /**

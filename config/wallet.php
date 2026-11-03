@@ -16,6 +16,20 @@ return [
 
     'amounts' => env('WALLET_AMOUNTS', 'decimal'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Amount Formatter
+    |--------------------------------------------------------------------------
+    |
+    | An invokable class used by balanceToString() and formatAmount(). It is
+    | called as __invoke(int|float $amount, string $currency): string, see
+    | \HesamRad\LaravelWallet\Contracts\FormatsAmount. When null, amounts
+    | are prefixed with the currency symbol (e.g. "$100.5").
+    |
+    */
+
+    'formatter' => null,
+
     'currency' => env('WALLET_CURRENCY', 'USD'),
 
     'currencies' => [
