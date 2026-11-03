@@ -75,7 +75,8 @@ trait InteractsWithWallet
     /**
      * Deposit a specified amount into the owner's wallet.
      *
-     * This operation is atomic, using DB::transaction with automatic retries (as configured).
+     * This operation is atomic: the wallet row is created if missing and locked
+     * for update inside a single DB::transaction with automatic retries (as configured).
      * It updates the in-memory model relation upon success for immediate accurate balance checks.
      *
      * @param float $amount The positive amount to deposit.
@@ -90,13 +91,10 @@ trait InteractsWithWallet
             throw new InvalidInputException();
         }
 
-        $wallet = $this->wallet()->firstOrCreate([
-            'owner_type' => static::class,
-            'owner_id' => $this->id,
-        ]);
-
         try {
-            DB::transaction(function () use ($wallet, $amount, $description, $meta) {
+            $wallet = DB::transaction(function () use ($amount, $description, $meta) {
+                $wallet = $this->lockWallet();
+
                 $wallet->increment('balance', $amount);
 
                 $wallet->logs()->create([
@@ -105,6 +103,8 @@ trait InteractsWithWallet
                     'description' => $description,
                     'meta' => $meta,
                 ]);
+
+                return $wallet;
             }, attempts: config('wallet.retry_attempts'));
 
             $this->setRelation('wallet', $wallet);
@@ -119,8 +119,8 @@ trait InteractsWithWallet
     /**
      * Withdraw a specified amount from the owner's wallet.
      *
-     * This operation is atomic, using DB::transaction with automatic retries.
-     * It checks for sufficient balance *before* initiating the transaction.
+     * This operation is atomic: the wallet row is locked for update and the balance
+     * is checked inside the same DB::transaction, so concurrent withdrawals cannot overdraw.
      * It updates the in-memory model relation upon success.
      *
      * @param float $amount The positive amount to withdraw.
@@ -135,17 +135,14 @@ trait InteractsWithWallet
             throw new InvalidInputException();
         }
 
-        $wallet = $this->wallet()->firstOrCreate([
-            'owner_type' => static::class,
-            'owner_id' => $this->id,
-        ]);
-
-        if (is_null($wallet) || $wallet->balance < $amount) {
-            throw new InsufficientBalanceException();
-        }
-
         try {
-            DB::transaction(function () use ($wallet, $amount, $description, $meta) {
+            $wallet = DB::transaction(function () use ($amount, $description, $meta) {
+                $wallet = $this->lockWallet();
+
+                if ($wallet->balance < $amount) {
+                    throw new InsufficientBalanceException();
+                }
+
                 $wallet->decrement('balance', $amount);
 
                 $wallet->logs()->create([
@@ -154,14 +151,35 @@ trait InteractsWithWallet
                     'description' => $description,
                     'meta' => $meta,
                 ]);
+
+                return $wallet;
             }, attempts: config('wallet.retry_attempts'));
 
             $this->setRelation('wallet', $wallet);
+        } catch (InsufficientBalanceException $e) {
+            throw $e;
         } catch (\Throwable $th) {
             report($th);
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * Find or create the owner's wallet and lock its row for update.
+     *
+     * Must be called inside a database transaction.
+     *
+     * @return \HesamRad\LaravelWallet\Models\Wallet
+     */
+    protected function lockWallet(): Wallet
+    {
+        $wallet = $this->wallet()->firstOrCreate([
+            'owner_type' => static::class,
+            'owner_id' => $this->id,
+        ]);
+
+        return Wallet::query()->whereKey($wallet->getKey())->lockForUpdate()->firstOrFail();
     }
 }
