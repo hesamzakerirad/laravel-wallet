@@ -29,6 +29,7 @@ class Log extends Model
         'reference_type',
         'reference_id',
         'idempotency_key',
+        'balance_after',
     ];
 
     /**
@@ -46,6 +47,7 @@ class Log extends Model
             'description' => 'string',
             'meta' => 'array',
             'idempotency_key' => 'string',
+            'balance_after' => 'float',
         ];
     }
 

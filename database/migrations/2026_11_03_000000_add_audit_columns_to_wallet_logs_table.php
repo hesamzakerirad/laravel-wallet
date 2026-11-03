@@ -15,6 +15,7 @@ return new class extends Migration {
         Schema::table('wallet_logs', function (Blueprint $table) {
             $table->nullableMorphs('reference');
             $table->string('idempotency_key')->nullable()->unique();
+            $table->decimal('balance_after', 20, 5)->nullable();
         });
     }
 
@@ -25,7 +26,7 @@ return new class extends Migration {
     {
         Schema::table('wallet_logs', function (Blueprint $table) {
             $table->dropUnique(['idempotency_key']);
-            $table->dropColumn('idempotency_key');
+            $table->dropColumn(['idempotency_key', 'balance_after']);
             $table->dropMorphs('reference');
         });
     }

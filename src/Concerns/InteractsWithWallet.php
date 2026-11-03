@@ -228,6 +228,9 @@ trait InteractsWithWallet
                 $wallet->increment('balance', $amount);
             }
 
+            // Read the stored value back so the log matches the column exactly.
+            $wallet->refresh();
+
             $log = $wallet->logs()->create([
                 'amount' => $amount,
                 'action' => $action,
@@ -236,6 +239,7 @@ trait InteractsWithWallet
                 'reference_type' => $reference?->getMorphClass(),
                 'reference_id' => $reference?->getKey(),
                 'idempotency_key' => $key,
+                'balance_after' => $wallet->getRawOriginal('balance'),
             ]);
 
             return [$wallet, $log];
