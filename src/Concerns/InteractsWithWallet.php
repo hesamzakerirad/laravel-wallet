@@ -44,6 +44,26 @@ trait InteractsWithWallet
     }
 
     /**
+     * Retrieve the current balance straight from the database.
+     *
+     * Unlike balance(), this ignores the cached wallet relation, so it sees
+     * changes made by other requests or processes. The cache is left untouched.
+     *
+     * @return int|float The current wallet balance (int in integer mode). Returns 0 if the wallet does not exist.
+     */
+    public function freshBalance(): int|float
+    {
+        $integer = config('wallet.amounts') === 'integer';
+        $balance = $this->wallet()->value('balance');
+
+        if ($balance === null) {
+            return $integer ? 0 : 0.0;
+        }
+
+        return $integer ? (int)$balance : (float)$balance;
+    }
+
+    /**
      * Retrieve the current balance formatted as a localized string
      * including the currency symbol. (e.g., "$100.50").
      *
