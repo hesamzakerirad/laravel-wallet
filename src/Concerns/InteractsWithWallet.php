@@ -6,6 +6,7 @@ use HesamRad\LaravelWallet\Exceptions\InsufficientBalanceException;
 use HesamRad\LaravelWallet\Exceptions\InvalidInputException;
 use HesamRad\LaravelWallet\Models\Log;
 use HesamRad\LaravelWallet\Models\Wallet;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
 
@@ -82,13 +83,18 @@ trait InteractsWithWallet
      * @param float $amount The positive amount to deposit.
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
      * @return bool
      * @throws InvalidInputException
      */
-    public function deposit(float $amount, ?string $description = '', ?array $meta = []): bool
-    {
+    public function deposit(
+        float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+    ): bool {
         try {
-            $this->depositOrFail($amount, $description, $meta);
+            $this->depositOrFail($amount, $description, $meta, $reference);
         } catch (InvalidInputException $e) {
             throw $e;
         } catch (\Throwable $th) {
@@ -109,33 +115,17 @@ trait InteractsWithWallet
      * @param float $amount The positive amount to deposit.
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
      * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
      * @throws InvalidInputException|\Throwable
      */
-    public function depositOrFail(float $amount, ?string $description = '', ?array $meta = []): Log
-    {
-        if ($amount <= 0) {
-            throw new InvalidInputException();
-        }
-
-        [$wallet, $log] = DB::transaction(function () use ($amount, $description, $meta) {
-            $wallet = $this->lockWallet();
-
-            $wallet->increment('balance', $amount);
-
-            $log = $wallet->logs()->create([
-                'amount' => $amount,
-                'action' => 'deposit',
-                'description' => $description,
-                'meta' => $meta,
-            ]);
-
-            return [$wallet, $log];
-        }, attempts: config('wallet.retry_attempts'));
-
-        $this->setRelation('wallet', $wallet);
-
-        return $log;
+    public function depositOrFail(
+        float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+    ): Log {
+        return $this->recordTransaction('deposit', $amount, $description, $meta, $reference);
     }
 
     /**
@@ -147,13 +137,18 @@ trait InteractsWithWallet
      * @param float $amount The positive amount to withdraw.
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
      * @return bool Returns true on success, false if a database/transaction error occurs.
      * @throws InvalidInputException|InsufficientBalanceException
      */
-    public function withdraw(float $amount, ?string $description = '', ?array $meta = []): bool
-    {
+    public function withdraw(
+        float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+    ): bool {
         try {
-            $this->withdrawOrFail($amount, $description, $meta);
+            $this->withdrawOrFail($amount, $description, $meta, $reference);
         } catch (InvalidInputException|InsufficientBalanceException $e) {
             throw $e;
         } catch (\Throwable $th) {
@@ -174,29 +169,57 @@ trait InteractsWithWallet
      * @param float $amount The positive amount to withdraw.
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
      * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
      * @throws InvalidInputException|InsufficientBalanceException|\Throwable
      */
-    public function withdrawOrFail(float $amount, ?string $description = '', ?array $meta = []): Log
-    {
+    public function withdrawOrFail(
+        float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+    ): Log {
+        return $this->recordTransaction('withdraw', $amount, $description, $meta, $reference);
+    }
+
+    /**
+     * Move money in or out of the locked wallet and write the matching log.
+     *
+     * @param string $action Either "deposit" or "withdraw".
+     * @return \HesamRad\LaravelWallet\Models\Log
+     * @throws InvalidInputException|InsufficientBalanceException|\Throwable
+     */
+    protected function recordTransaction(
+        string $action,
+        float $amount,
+        ?string $description,
+        ?array $meta,
+        ?Model $reference,
+    ): Log {
         if ($amount <= 0) {
             throw new InvalidInputException();
         }
 
-        [$wallet, $log] = DB::transaction(function () use ($amount, $description, $meta) {
+        [$wallet, $log] = DB::transaction(function () use ($action, $amount, $description, $meta, $reference) {
             $wallet = $this->lockWallet();
 
-            if ($wallet->balance < $amount) {
-                throw new InsufficientBalanceException();
-            }
+            if ($action === 'withdraw') {
+                if ($wallet->balance < $amount) {
+                    throw new InsufficientBalanceException();
+                }
 
-            $wallet->decrement('balance', $amount);
+                $wallet->decrement('balance', $amount);
+            } else {
+                $wallet->increment('balance', $amount);
+            }
 
             $log = $wallet->logs()->create([
                 'amount' => $amount,
-                'action' => 'withdraw',
+                'action' => $action,
                 'description' => $description,
                 'meta' => $meta,
+                'reference_type' => $reference?->getMorphClass(),
+                'reference_id' => $reference?->getKey(),
             ]);
 
             return [$wallet, $log];
