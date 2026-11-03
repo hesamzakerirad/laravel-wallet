@@ -84,6 +84,7 @@ trait InteractsWithWallet
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
      * @return bool
      * @throws InvalidInputException
      */
@@ -92,9 +93,10 @@ trait InteractsWithWallet
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
+        ?string $key = null,
     ): bool {
         try {
-            $this->depositOrFail($amount, $description, $meta, $reference);
+            $this->depositOrFail($amount, $description, $meta, $reference, $key);
         } catch (InvalidInputException $e) {
             throw $e;
         } catch (\Throwable $th) {
@@ -116,6 +118,7 @@ trait InteractsWithWallet
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
      * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
      * @throws InvalidInputException|\Throwable
      */
@@ -124,8 +127,9 @@ trait InteractsWithWallet
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
+        ?string $key = null,
     ): Log {
-        return $this->recordTransaction('deposit', $amount, $description, $meta, $reference);
+        return $this->recordTransaction('deposit', $amount, $description, $meta, $reference, $key);
     }
 
     /**
@@ -138,6 +142,7 @@ trait InteractsWithWallet
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
      * @return bool Returns true on success, false if a database/transaction error occurs.
      * @throws InvalidInputException|InsufficientBalanceException
      */
@@ -146,9 +151,10 @@ trait InteractsWithWallet
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
+        ?string $key = null,
     ): bool {
         try {
-            $this->withdrawOrFail($amount, $description, $meta, $reference);
+            $this->withdrawOrFail($amount, $description, $meta, $reference, $key);
         } catch (InvalidInputException|InsufficientBalanceException $e) {
             throw $e;
         } catch (\Throwable $th) {
@@ -170,6 +176,7 @@ trait InteractsWithWallet
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
      * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
      * @throws InvalidInputException|InsufficientBalanceException|\Throwable
      */
@@ -178,8 +185,9 @@ trait InteractsWithWallet
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
+        ?string $key = null,
     ): Log {
-        return $this->recordTransaction('withdraw', $amount, $description, $meta, $reference);
+        return $this->recordTransaction('withdraw', $amount, $description, $meta, $reference, $key);
     }
 
     /**
@@ -195,13 +203,20 @@ trait InteractsWithWallet
         ?string $description,
         ?array $meta,
         ?Model $reference,
+        ?string $key,
     ): Log {
         if ($amount <= 0) {
             throw new InvalidInputException();
         }
 
-        [$wallet, $log] = DB::transaction(function () use ($action, $amount, $description, $meta, $reference) {
+        [$wallet, $log] = DB::transaction(function () use ($action, $amount, $description, $meta, $reference, $key) {
             $wallet = $this->lockWallet();
+
+            // Checked under the wallet lock, so a retried call waits for the first one
+            // and then returns its log instead of moving money twice.
+            if ($key !== null && $existing = Log::query()->where('idempotency_key', $key)->first()) {
+                return [$wallet, $existing];
+            }
 
             if ($action === 'withdraw') {
                 if ($wallet->balance < $amount) {
@@ -220,6 +235,7 @@ trait InteractsWithWallet
                 'meta' => $meta,
                 'reference_type' => $reference?->getMorphClass(),
                 'reference_id' => $reference?->getKey(),
+                'idempotency_key' => $key,
             ]);
 
             return [$wallet, $log];

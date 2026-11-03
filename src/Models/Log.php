@@ -28,6 +28,7 @@ class Log extends Model
         'meta',
         'reference_type',
         'reference_id',
+        'idempotency_key',
     ];
 
     /**
@@ -44,6 +45,7 @@ class Log extends Model
             'action' => 'string',
             'description' => 'string',
             'meta' => 'array',
+            'idempotency_key' => 'string',
         ];
     }
 

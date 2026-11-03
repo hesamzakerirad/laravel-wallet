@@ -14,6 +14,7 @@ return new class extends Migration {
     {
         Schema::table('wallet_logs', function (Blueprint $table) {
             $table->nullableMorphs('reference');
+            $table->string('idempotency_key')->nullable()->unique();
         });
     }
 
@@ -23,6 +24,8 @@ return new class extends Migration {
     public function down(): void
     {
         Schema::table('wallet_logs', function (Blueprint $table) {
+            $table->dropUnique(['idempotency_key']);
+            $table->dropColumn('idempotency_key');
             $table->dropMorphs('reference');
         });
     }
