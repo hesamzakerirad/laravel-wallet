@@ -15,7 +15,11 @@ return new class extends Migration {
         Schema::table('wallet_logs', function (Blueprint $table) {
             $table->nullableMorphs('reference');
             $table->string('idempotency_key')->nullable()->unique();
-            $table->decimal('balance_after', 20, 5)->nullable();
+            if (config('wallet.amounts') === 'integer') {
+                $table->bigInteger('balance_after')->nullable();
+            } else {
+                $table->decimal('balance_after', 20, 5)->nullable();
+            }
         });
     }
 

@@ -3,6 +3,19 @@
 return [
     'retry_attempts' => 5,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Amount Storage
+    |--------------------------------------------------------------------------
+    |
+    | "decimal" stores amounts as DECIMAL(20, 5) and accepts fractions.
+    | "integer" stores amounts as BIGINT (e.g. cents) and refuses fractions.
+    | The published migrations read this value, so set it before migrating.
+    |
+    */
+
+    'amounts' => env('WALLET_AMOUNTS', 'decimal'),
+
     'currency' => env('WALLET_CURRENCY', 'USD'),
 
     'currencies' => [

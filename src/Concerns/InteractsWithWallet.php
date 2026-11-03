@@ -80,7 +80,7 @@ trait InteractsWithWallet
      * Database errors are reported and turned into a false return value.
      * Use depositOrFail() to receive the exception instead.
      *
-     * @param float $amount The positive amount to deposit.
+     * @param int|float $amount The positive amount to deposit.
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
@@ -89,7 +89,7 @@ trait InteractsWithWallet
      * @throws InvalidInputException
      */
     public function deposit(
-        float $amount,
+        int|float $amount,
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
@@ -114,7 +114,7 @@ trait InteractsWithWallet
      * for update inside a single DB::transaction with automatic retries (as configured).
      * It updates the in-memory model relation upon success for immediate accurate balance checks.
      *
-     * @param float $amount The positive amount to deposit.
+     * @param int|float $amount The positive amount to deposit.
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
@@ -123,7 +123,7 @@ trait InteractsWithWallet
      * @throws InvalidInputException|\Throwable
      */
     public function depositOrFail(
-        float $amount,
+        int|float $amount,
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
@@ -138,7 +138,7 @@ trait InteractsWithWallet
      * Database errors are reported and turned into a false return value.
      * Use withdrawOrFail() to receive the exception instead.
      *
-     * @param float $amount The positive amount to withdraw.
+     * @param int|float $amount The positive amount to withdraw.
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
@@ -147,7 +147,7 @@ trait InteractsWithWallet
      * @throws InvalidInputException|InsufficientBalanceException
      */
     public function withdraw(
-        float $amount,
+        int|float $amount,
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
@@ -172,7 +172,7 @@ trait InteractsWithWallet
      * is checked inside the same DB::transaction, so concurrent withdrawals cannot overdraw.
      * It updates the in-memory model relation upon success.
      *
-     * @param float $amount The positive amount to withdraw.
+     * @param int|float $amount The positive amount to withdraw.
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
      * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
@@ -181,7 +181,7 @@ trait InteractsWithWallet
      * @throws InvalidInputException|InsufficientBalanceException|\Throwable
      */
     public function withdrawOrFail(
-        float $amount,
+        int|float $amount,
         ?string $description = '',
         ?array $meta = [],
         ?Model $reference = null,
@@ -199,15 +199,13 @@ trait InteractsWithWallet
      */
     protected function recordTransaction(
         string $action,
-        float $amount,
+        int|float $amount,
         ?string $description,
         ?array $meta,
         ?Model $reference,
         ?string $key,
     ): Log {
-        if ($amount <= 0) {
-            throw new InvalidInputException();
-        }
+        $amount = $this->normalizeWalletAmount($amount);
 
         [$wallet, $log] = DB::transaction(function () use ($action, $amount, $description, $meta, $reference, $key) {
             $wallet = $this->lockWallet();
@@ -248,6 +246,32 @@ trait InteractsWithWallet
         $this->setRelation('wallet', $wallet);
 
         return $log;
+    }
+
+    /**
+     * Validate an amount and cast it to the configured storage type.
+     *
+     * In integer mode the amount must be a whole number (e.g. cents).
+     *
+     * @param int|float $amount
+     * @return int|float
+     * @throws InvalidInputException
+     */
+    protected function normalizeWalletAmount(int|float $amount): int|float
+    {
+        if ($amount <= 0) {
+            throw new InvalidInputException();
+        }
+
+        if (config('wallet.amounts') !== 'integer') {
+            return $amount;
+        }
+
+        if (is_float($amount) && floor($amount) !== $amount) {
+            throw new InvalidInputException();
+        }
+
+        return (int)$amount;
     }
 
     /**

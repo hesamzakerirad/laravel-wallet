@@ -42,12 +42,12 @@ class Log extends Model
         return [
             'id' => 'integer',
             'wallet_id' => 'integer',
-            'amount' => 'float',
+            'amount' => config('wallet.amounts') === 'integer' ? 'integer' : 'float',
             'action' => 'string',
             'description' => 'string',
             'meta' => 'array',
             'idempotency_key' => 'string',
-            'balance_after' => 'float',
+            'balance_after' => config('wallet.amounts') === 'integer' ? 'integer' : 'float',
         ];
     }
 
