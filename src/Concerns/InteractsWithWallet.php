@@ -2,6 +2,8 @@
 
 namespace HesamRad\LaravelWallet\Concerns;
 
+use HesamRad\LaravelWallet\Events\WalletDeposited;
+use HesamRad\LaravelWallet\Events\WalletWithdrawn;
 use HesamRad\LaravelWallet\Exceptions\InsufficientBalanceException;
 use HesamRad\LaravelWallet\Exceptions\InvalidInputException;
 use HesamRad\LaravelWallet\Models\Log;
@@ -261,6 +263,11 @@ trait InteractsWithWallet
                 'idempotency_key' => $key,
                 'balance_after' => $wallet->getRawOriginal('balance'),
             ]);
+
+            // Runs once the outermost transaction commits, and never if it rolls back.
+            DB::afterCommit(function () use ($action, $log) {
+                event($action === 'withdraw' ? new WalletWithdrawn($log) : new WalletDeposited($log));
+            });
 
             return [$wallet, $log];
         }, attempts: config('wallet.retry_attempts'));
