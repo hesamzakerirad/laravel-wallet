@@ -351,10 +351,9 @@ trait InteractsWithWallet
      */
     protected function lockWallet(): Wallet
     {
-        $wallet = $this->wallet()->firstOrCreate([
-            'owner_type' => static::class,
-            'owner_id' => $this->id,
-        ]);
+        // The morphOne relation already scopes to this owner's morph class and key,
+        // so a morph map alias (e.g. "user") is matched instead of the class name.
+        $wallet = $this->wallet()->firstOrCreate();
 
         return Wallet::query()->whereKey($wallet->getKey())->lockForUpdate()->firstOrFail();
     }
