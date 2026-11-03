@@ -9,6 +9,7 @@ use HesamRad\LaravelWallet\Exceptions\InvalidInputException;
 use HesamRad\LaravelWallet\Models\Log;
 use HesamRad\LaravelWallet\Models\Wallet;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
 
@@ -22,6 +23,24 @@ trait InteractsWithWallet
     public function wallet(): MorphOne
     {
         return $this->morphOne(Wallet::class, 'owner');
+    }
+
+    /**
+     * Define the relationship to every log of the owner's wallet, newest first.
+     *
+     * Useful for listing transactions (e.g. a billing page) without loading the wallet first.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough<Log, Wallet, $this>
+     */
+    public function walletLogs(): HasManyThrough
+    {
+        $wallet = new Wallet();
+        $log = new Log();
+
+        return $this->hasManyThrough(Log::class, Wallet::class, 'owner_id', 'wallet_id')
+            ->where($wallet->qualifyColumn('owner_type'), $this->getMorphClass())
+            ->latest($log->qualifyColumn('created_at'))
+            ->orderByDesc($log->qualifyColumn('id'));
     }
 
     /**
