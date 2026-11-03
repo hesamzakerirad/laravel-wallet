@@ -4,6 +4,7 @@ namespace HesamRad\LaravelWallet\Concerns;
 
 use HesamRad\LaravelWallet\Exceptions\InsufficientBalanceException;
 use HesamRad\LaravelWallet\Exceptions\InvalidInputException;
+use HesamRad\LaravelWallet\Models\Log;
 use HesamRad\LaravelWallet\Models\Wallet;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
@@ -75,9 +76,8 @@ trait InteractsWithWallet
     /**
      * Deposit a specified amount into the owner's wallet.
      *
-     * This operation is atomic: the wallet row is created if missing and locked
-     * for update inside a single DB::transaction with automatic retries (as configured).
-     * It updates the in-memory model relation upon success for immediate accurate balance checks.
+     * Database errors are reported and turned into a false return value.
+     * Use depositOrFail() to receive the exception instead.
      *
      * @param float $amount The positive amount to deposit.
      * @param string|null $description Optional description for the wallet log.
@@ -87,27 +87,10 @@ trait InteractsWithWallet
      */
     public function deposit(float $amount, ?string $description = '', ?array $meta = []): bool
     {
-        if ($amount <= 0) {
-            throw new InvalidInputException();
-        }
-
         try {
-            $wallet = DB::transaction(function () use ($amount, $description, $meta) {
-                $wallet = $this->lockWallet();
-
-                $wallet->increment('balance', $amount);
-
-                $wallet->logs()->create([
-                    'amount' => $amount,
-                    'action' => 'deposit',
-                    'description' => $description,
-                    'meta' => $meta,
-                ]);
-
-                return $wallet;
-            }, attempts: config('wallet.retry_attempts'));
-
-            $this->setRelation('wallet', $wallet);
+            $this->depositOrFail($amount, $description, $meta);
+        } catch (InvalidInputException $e) {
+            throw $e;
         } catch (\Throwable $th) {
             report($th);
             return false;
@@ -117,11 +100,49 @@ trait InteractsWithWallet
     }
 
     /**
+     * Deposit a specified amount into the owner's wallet, throwing on any failure.
+     *
+     * This operation is atomic: the wallet row is created if missing and locked
+     * for update inside a single DB::transaction with automatic retries (as configured).
+     * It updates the in-memory model relation upon success for immediate accurate balance checks.
+     *
+     * @param float $amount The positive amount to deposit.
+     * @param string|null $description Optional description for the wallet log.
+     * @param array|null $meta Optional metadata array for the wallet log.
+     * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
+     * @throws InvalidInputException|\Throwable
+     */
+    public function depositOrFail(float $amount, ?string $description = '', ?array $meta = []): Log
+    {
+        if ($amount <= 0) {
+            throw new InvalidInputException();
+        }
+
+        [$wallet, $log] = DB::transaction(function () use ($amount, $description, $meta) {
+            $wallet = $this->lockWallet();
+
+            $wallet->increment('balance', $amount);
+
+            $log = $wallet->logs()->create([
+                'amount' => $amount,
+                'action' => 'deposit',
+                'description' => $description,
+                'meta' => $meta,
+            ]);
+
+            return [$wallet, $log];
+        }, attempts: config('wallet.retry_attempts'));
+
+        $this->setRelation('wallet', $wallet);
+
+        return $log;
+    }
+
+    /**
      * Withdraw a specified amount from the owner's wallet.
      *
-     * This operation is atomic: the wallet row is locked for update and the balance
-     * is checked inside the same DB::transaction, so concurrent withdrawals cannot overdraw.
-     * It updates the in-memory model relation upon success.
+     * Database errors are reported and turned into a false return value.
+     * Use withdrawOrFail() to receive the exception instead.
      *
      * @param float $amount The positive amount to withdraw.
      * @param string|null $description Optional description for the transaction log.
@@ -131,32 +152,9 @@ trait InteractsWithWallet
      */
     public function withdraw(float $amount, ?string $description = '', ?array $meta = []): bool
     {
-        if ($amount <= 0) {
-            throw new InvalidInputException();
-        }
-
         try {
-            $wallet = DB::transaction(function () use ($amount, $description, $meta) {
-                $wallet = $this->lockWallet();
-
-                if ($wallet->balance < $amount) {
-                    throw new InsufficientBalanceException();
-                }
-
-                $wallet->decrement('balance', $amount);
-
-                $wallet->logs()->create([
-                    'amount' => $amount,
-                    'action' => 'withdraw',
-                    'description' => $description,
-                    'meta' => $meta,
-                ]);
-
-                return $wallet;
-            }, attempts: config('wallet.retry_attempts'));
-
-            $this->setRelation('wallet', $wallet);
-        } catch (InsufficientBalanceException $e) {
+            $this->withdrawOrFail($amount, $description, $meta);
+        } catch (InvalidInputException|InsufficientBalanceException $e) {
             throw $e;
         } catch (\Throwable $th) {
             report($th);
@@ -164,6 +162,49 @@ trait InteractsWithWallet
         }
 
         return true;
+    }
+
+    /**
+     * Withdraw a specified amount from the owner's wallet, throwing on any failure.
+     *
+     * This operation is atomic: the wallet row is locked for update and the balance
+     * is checked inside the same DB::transaction, so concurrent withdrawals cannot overdraw.
+     * It updates the in-memory model relation upon success.
+     *
+     * @param float $amount The positive amount to withdraw.
+     * @param string|null $description Optional description for the transaction log.
+     * @param array|null $meta Optional metadata array for the transaction log.
+     * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
+     * @throws InvalidInputException|InsufficientBalanceException|\Throwable
+     */
+    public function withdrawOrFail(float $amount, ?string $description = '', ?array $meta = []): Log
+    {
+        if ($amount <= 0) {
+            throw new InvalidInputException();
+        }
+
+        [$wallet, $log] = DB::transaction(function () use ($amount, $description, $meta) {
+            $wallet = $this->lockWallet();
+
+            if ($wallet->balance < $amount) {
+                throw new InsufficientBalanceException();
+            }
+
+            $wallet->decrement('balance', $amount);
+
+            $log = $wallet->logs()->create([
+                'amount' => $amount,
+                'action' => 'withdraw',
+                'description' => $description,
+                'meta' => $meta,
+            ]);
+
+            return [$wallet, $log];
+        }, attempts: config('wallet.retry_attempts'));
+
+        $this->setRelation('wallet', $wallet);
+
+        return $log;
     }
 
     /**
