@@ -13,7 +13,11 @@ return new class extends Migration {
         Schema::create('wallets', function (Blueprint $table) {
             $table->id();
             $table->morphs('owner');
-            $table->decimal('balance', 20, 5)->default(0);
+            if (config('wallet.amounts') === 'integer') {
+                $table->bigInteger('balance')->default(0);
+            } else {
+                $table->decimal('balance', 20, 5)->default(0);
+            }
             $table->timestamps();
         });
     }

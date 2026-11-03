@@ -2,9 +2,14 @@
 
 namespace HesamRad\LaravelWallet\Concerns;
 
+use HesamRad\LaravelWallet\Events\WalletDeposited;
+use HesamRad\LaravelWallet\Events\WalletWithdrawn;
 use HesamRad\LaravelWallet\Exceptions\InsufficientBalanceException;
 use HesamRad\LaravelWallet\Exceptions\InvalidInputException;
+use HesamRad\LaravelWallet\Models\Log;
 use HesamRad\LaravelWallet\Models\Wallet;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
 
@@ -18,6 +23,24 @@ trait InteractsWithWallet
     public function wallet(): MorphOne
     {
         return $this->morphOne(Wallet::class, 'owner');
+    }
+
+    /**
+     * Define the relationship to every log of the owner's wallet, newest first.
+     *
+     * Useful for listing transactions (e.g. a billing page) without loading the wallet first.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough<Log, Wallet, $this>
+     */
+    public function walletLogs(): HasManyThrough
+    {
+        $wallet = new Wallet();
+        $log = new Log();
+
+        return $this->hasManyThrough(Log::class, Wallet::class, 'owner_id', 'wallet_id')
+            ->where($wallet->qualifyColumn('owner_type'), $this->getMorphClass())
+            ->latest($log->qualifyColumn('created_at'))
+            ->orderByDesc($log->qualifyColumn('id'));
     }
 
     /**
@@ -40,14 +63,56 @@ trait InteractsWithWallet
     }
 
     /**
+     * Retrieve the current balance straight from the database.
+     *
+     * Unlike balance(), this ignores the cached wallet relation, so it sees
+     * changes made by other requests or processes. The cache is left untouched.
+     *
+     * @return int|float The current wallet balance (int in integer mode). Returns 0 if the wallet does not exist.
+     */
+    public function freshBalance(): int|float
+    {
+        $integer = config('wallet.amounts') === 'integer';
+        $balance = $this->wallet()->value('balance');
+
+        if ($balance === null) {
+            return $integer ? 0 : 0.0;
+        }
+
+        return $integer ? (int)$balance : (float)$balance;
+    }
+
+    /**
      * Retrieve the current balance formatted as a localized string
      * including the currency symbol. (e.g., "$100.50").
+     *
+     * Uses the `wallet.formatter` class when one is configured.
      *
      * @return string
      */
     public function balanceToString(): string
     {
-        return (string)$this->currencySymbol() . $this->balance();
+        return $this->formatAmount($this->balance());
+    }
+
+    /**
+     * Format any amount the same way as balanceToString().
+     *
+     * Uses the `wallet.formatter` class when one is configured,
+     * otherwise prefixes the currency symbol (e.g., "$100.5").
+     *
+     * @param int|float $amount
+     * @return string
+     */
+    public function formatAmount(int|float $amount): string
+    {
+        $formatter = config('wallet.formatter');
+
+        if ($formatter) {
+            return (string)app($formatter)($amount, $this->currency());
+        }
+
+        return (string)$this->currencySymbol() . $amount;
     }
 
     /**
@@ -75,39 +140,28 @@ trait InteractsWithWallet
     /**
      * Deposit a specified amount into the owner's wallet.
      *
-     * This operation is atomic, using DB::transaction with automatic retries (as configured).
-     * It updates the in-memory model relation upon success for immediate accurate balance checks.
+     * Database errors are reported and turned into a false return value.
+     * Use depositOrFail() to receive the exception instead.
      *
-     * @param float $amount The positive amount to deposit.
+     * @param int|float $amount The positive amount to deposit.
      * @param string|null $description Optional description for the wallet log.
      * @param array|null $meta Optional metadata array for the wallet log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
      * @return bool
      * @throws InvalidInputException
      */
-    public function deposit(float $amount, ?string $description = '', ?array $meta = []): bool
-    {
-        if ($amount <= 0) {
-            throw new InvalidInputException();
-        }
-
-        $wallet = $this->wallet()->firstOrCreate([
-            'owner_type' => static::class,
-            'owner_id' => $this->id,
-        ]);
-
+    public function deposit(
+        int|float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+        ?string $key = null,
+    ): bool {
         try {
-            DB::transaction(function () use ($wallet, $amount, $description, $meta) {
-                $wallet->increment('balance', $amount);
-
-                $wallet->logs()->create([
-                    'amount' => $amount,
-                    'action' => 'deposit',
-                    'description' => $description,
-                    'meta' => $meta,
-                ]);
-            }, attempts: config('wallet.retry_attempts'));
-
-            $this->setRelation('wallet', $wallet);
+            $this->depositOrFail($amount, $description, $meta, $reference, $key);
+        } catch (InvalidInputException $e) {
+            throw $e;
         } catch (\Throwable $th) {
             report($th);
             return false;
@@ -117,51 +171,190 @@ trait InteractsWithWallet
     }
 
     /**
+     * Deposit a specified amount into the owner's wallet, throwing on any failure.
+     *
+     * This operation is atomic: the wallet row is created if missing and locked
+     * for update inside a single DB::transaction with automatic retries (as configured).
+     * It updates the in-memory model relation upon success for immediate accurate balance checks.
+     *
+     * @param int|float $amount The positive amount to deposit.
+     * @param string|null $description Optional description for the wallet log.
+     * @param array|null $meta Optional metadata array for the wallet log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this deposit belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
+     * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
+     * @throws InvalidInputException|\Throwable
+     */
+    public function depositOrFail(
+        int|float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+        ?string $key = null,
+    ): Log {
+        return $this->recordTransaction('deposit', $amount, $description, $meta, $reference, $key);
+    }
+
+    /**
      * Withdraw a specified amount from the owner's wallet.
      *
-     * This operation is atomic, using DB::transaction with automatic retries.
-     * It checks for sufficient balance *before* initiating the transaction.
-     * It updates the in-memory model relation upon success.
+     * Database errors are reported and turned into a false return value.
+     * Use withdrawOrFail() to receive the exception instead.
      *
-     * @param float $amount The positive amount to withdraw.
+     * @param int|float $amount The positive amount to withdraw.
      * @param string|null $description Optional description for the transaction log.
      * @param array|null $meta Optional metadata array for the transaction log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
      * @return bool Returns true on success, false if a database/transaction error occurs.
      * @throws InvalidInputException|InsufficientBalanceException
      */
-    public function withdraw(float $amount, ?string $description = '', ?array $meta = []): bool
-    {
-        if ($amount <= 0) {
-            throw new InvalidInputException();
-        }
-
-        $wallet = $this->wallet()->firstOrCreate([
-            'owner_type' => static::class,
-            'owner_id' => $this->id,
-        ]);
-
-        if (is_null($wallet) || $wallet->balance < $amount) {
-            throw new InsufficientBalanceException();
-        }
-
+    public function withdraw(
+        int|float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+        ?string $key = null,
+    ): bool {
         try {
-            DB::transaction(function () use ($wallet, $amount, $description, $meta) {
-                $wallet->decrement('balance', $amount);
-
-                $wallet->logs()->create([
-                    'amount' => $amount,
-                    'action' => 'withdraw',
-                    'description' => $description,
-                    'meta' => $meta,
-                ]);
-            }, attempts: config('wallet.retry_attempts'));
-
-            $this->setRelation('wallet', $wallet);
+            $this->withdrawOrFail($amount, $description, $meta, $reference, $key);
+        } catch (InvalidInputException|InsufficientBalanceException $e) {
+            throw $e;
         } catch (\Throwable $th) {
             report($th);
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * Withdraw a specified amount from the owner's wallet, throwing on any failure.
+     *
+     * This operation is atomic: the wallet row is locked for update and the balance
+     * is checked inside the same DB::transaction, so concurrent withdrawals cannot overdraw.
+     * It updates the in-memory model relation upon success.
+     *
+     * @param int|float $amount The positive amount to withdraw.
+     * @param string|null $description Optional description for the transaction log.
+     * @param array|null $meta Optional metadata array for the transaction log.
+     * @param \Illuminate\Database\Eloquent\Model|null $reference Optional model this withdrawal belongs to (e.g. an order).
+     * @param string|null $key Optional idempotency key. A repeated key returns the first log and moves no money.
+     * @return \HesamRad\LaravelWallet\Models\Log The created wallet log.
+     * @throws InvalidInputException|InsufficientBalanceException|\Throwable
+     */
+    public function withdrawOrFail(
+        int|float $amount,
+        ?string $description = '',
+        ?array $meta = [],
+        ?Model $reference = null,
+        ?string $key = null,
+    ): Log {
+        return $this->recordTransaction('withdraw', $amount, $description, $meta, $reference, $key);
+    }
+
+    /**
+     * Move money in or out of the locked wallet and write the matching log.
+     *
+     * @param string $action Either "deposit" or "withdraw".
+     * @return \HesamRad\LaravelWallet\Models\Log
+     * @throws InvalidInputException|InsufficientBalanceException|\Throwable
+     */
+    protected function recordTransaction(
+        string $action,
+        int|float $amount,
+        ?string $description,
+        ?array $meta,
+        ?Model $reference,
+        ?string $key,
+    ): Log {
+        $amount = $this->normalizeWalletAmount($amount);
+
+        [$wallet, $log] = DB::transaction(function () use ($action, $amount, $description, $meta, $reference, $key) {
+            $wallet = $this->lockWallet();
+
+            // Checked under the wallet lock, so a retried call waits for the first one
+            // and then returns its log instead of moving money twice.
+            if ($key !== null && $existing = Log::query()->where('idempotency_key', $key)->first()) {
+                return [$wallet, $existing];
+            }
+
+            if ($action === 'withdraw') {
+                if ($wallet->balance < $amount) {
+                    throw new InsufficientBalanceException();
+                }
+
+                $wallet->decrement('balance', $amount);
+            } else {
+                $wallet->increment('balance', $amount);
+            }
+
+            // Read the stored value back so the log matches the column exactly.
+            $wallet->refresh();
+
+            $log = $wallet->logs()->create([
+                'amount' => $amount,
+                'action' => $action,
+                'description' => $description,
+                'meta' => $meta,
+                'reference_type' => $reference?->getMorphClass(),
+                'reference_id' => $reference?->getKey(),
+                'idempotency_key' => $key,
+                'balance_after' => $wallet->getRawOriginal('balance'),
+            ]);
+
+            // Runs once the outermost transaction commits, and never if it rolls back.
+            DB::afterCommit(function () use ($action, $log) {
+                event($action === 'withdraw' ? new WalletWithdrawn($log) : new WalletDeposited($log));
+            });
+
+            return [$wallet, $log];
+        }, attempts: config('wallet.retry_attempts'));
+
+        $this->setRelation('wallet', $wallet);
+
+        return $log;
+    }
+
+    /**
+     * Validate an amount and cast it to the configured storage type.
+     *
+     * In integer mode the amount must be a whole number (e.g. cents).
+     *
+     * @param int|float $amount
+     * @return int|float
+     * @throws InvalidInputException
+     */
+    protected function normalizeWalletAmount(int|float $amount): int|float
+    {
+        if ($amount <= 0) {
+            throw new InvalidInputException();
+        }
+
+        if (config('wallet.amounts') !== 'integer') {
+            return $amount;
+        }
+
+        if (is_float($amount) && floor($amount) !== $amount) {
+            throw new InvalidInputException();
+        }
+
+        return (int)$amount;
+    }
+
+    /**
+     * Find or create the owner's wallet and lock its row for update.
+     *
+     * Must be called inside a database transaction.
+     *
+     * @return \HesamRad\LaravelWallet\Models\Wallet
+     */
+    protected function lockWallet(): Wallet
+    {
+        // The morphOne relation already scopes to this owner's morph class and key,
+        // so a morph map alias (e.g. "user") is matched instead of the class name.
+        $wallet = $this->wallet()->firstOrCreate();
+
+        return Wallet::query()->whereKey($wallet->getKey())->lockForUpdate()->firstOrFail();
     }
 }

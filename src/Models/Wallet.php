@@ -33,7 +33,7 @@ class Wallet extends Model
             'id' => 'integer',
             'owner_type' => 'string',
             'owner_id' => 'integer',
-            'balance' => 'double',
+            'balance' => config('wallet.amounts') === 'integer' ? 'integer' : 'double',
         ];
     }
 

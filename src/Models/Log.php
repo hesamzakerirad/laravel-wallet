@@ -4,6 +4,7 @@ namespace HesamRad\LaravelWallet\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class Log extends Model
 {
@@ -25,6 +26,10 @@ class Log extends Model
         'action',
         'description',
         'meta',
+        'reference_type',
+        'reference_id',
+        'idempotency_key',
+        'balance_after',
     ];
 
     /**
@@ -37,10 +42,12 @@ class Log extends Model
         return [
             'id' => 'integer',
             'wallet_id' => 'integer',
-            'amount' => 'float',
+            'amount' => config('wallet.amounts') === 'integer' ? 'integer' : 'float',
             'action' => 'string',
             'description' => 'string',
             'meta' => 'array',
+            'idempotency_key' => 'string',
+            'balance_after' => config('wallet.amounts') === 'integer' ? 'integer' : 'float',
         ];
     }
 
@@ -52,5 +59,15 @@ class Log extends Model
     public function wallet(): BelongsTo
     {
         return $this->belongsTo(Wallet::class);
+    }
+
+    /**
+     * Return the model this log refers to (e.g. an order), if any.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\MorphTo<Model, Log>
+     */
+    public function reference(): MorphTo
+    {
+        return $this->morphTo();
     }
 }

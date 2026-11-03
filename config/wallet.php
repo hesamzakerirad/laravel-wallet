@@ -3,6 +3,33 @@
 return [
     'retry_attempts' => 5,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Amount Storage
+    |--------------------------------------------------------------------------
+    |
+    | "decimal" stores amounts as DECIMAL(20, 5) and accepts fractions.
+    | "integer" stores amounts as BIGINT (e.g. cents) and refuses fractions.
+    | The published migrations read this value, so set it before migrating.
+    |
+    */
+
+    'amounts' => env('WALLET_AMOUNTS', 'decimal'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Amount Formatter
+    |--------------------------------------------------------------------------
+    |
+    | An invokable class used by balanceToString() and formatAmount(). It is
+    | called as __invoke(int|float $amount, string $currency): string, see
+    | \HesamRad\LaravelWallet\Contracts\FormatsAmount. When null, amounts
+    | are prefixed with the currency symbol (e.g. "$100.5").
+    |
+    */
+
+    'formatter' => null,
+
     'currency' => env('WALLET_CURRENCY', 'USD'),
 
     'currencies' => [

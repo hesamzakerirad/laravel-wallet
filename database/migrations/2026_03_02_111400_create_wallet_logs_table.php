@@ -13,7 +13,11 @@ return new class extends Migration {
         Schema::create('wallet_logs', function (Blueprint $table) {
             $table->id();
             $table->foreignId('wallet_id')->constrained();
-            $table->decimal('amount', 20, 5)->default(0);
+            if (config('wallet.amounts') === 'integer') {
+                $table->bigInteger('amount')->default(0);
+            } else {
+                $table->decimal('amount', 20, 5)->default(0);
+            }
             $table->enum('action', [
                 'deposit',
                 'withdraw',
