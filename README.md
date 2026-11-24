@@ -192,6 +192,12 @@ $user->freshBalance();
 $logs = $user->walletLogs()->paginate(20);
 ```
 
+## Owners with ULID or UUID keys
+
+The published migrations use `morphs()`, which makes `owner_id` an integer column. If your owner model has ULID or UUID keys, edit the published migrations before you migrate: use `ulidMorphs('owner')` or `uuidMorphs('owner')` in `create_wallets_table`. If your references also use string keys, use `nullableUlidMorphs('reference')` or `nullableUuidMorphs('reference')` in `add_audit_columns_to_wallet_logs_table`.
+
+`owner_id` has no cast on the `Wallet` model, so `$wallet->owner_id` returns the key as the database stores it.
+
 ## Upgrading from 1.0 to 1.1
 
 Version 1.1 is backward compatible. Existing calls, return values and exceptions are unchanged, and the `HasWallet` interface is the same.
