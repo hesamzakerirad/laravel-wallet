@@ -230,7 +230,7 @@ The concurrency tests need the `pcntl` and `posix` extensions and are skipped wi
 
 If you encounter any issues, have questions or some idea to improve the package, feel free to create an issue or reach out to me:
 
-1. [Create a new issue](https://github.com/hesamzakerirad/laravel-wallet/issues/new)
+1. [Create a new issue](https://github.com/radestsam/laravel-wallet/issues/new)
 2. [Email me](mailto:hesamzakerirad@gmail.com)
 
 ## License
@@ -239,5 +239,5 @@ This package is open-source software licensed under the MIT license.
 
 ## Credits
 
-- [Hesam Rad](https://github.com/hesamzakerirad)
+- [Hesam Rad](https://github.com/radestsam)
 - [All Contributors](../../contributors)
