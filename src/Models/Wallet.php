@@ -25,6 +25,8 @@ class Wallet extends Model
     /**
      * Get the attributes that should be cast.
      *
+     * owner_id has no cast: the owner key can be an integer, a ULID or a UUID.
+     *
      * @return array<string, string>
      */
     protected function casts(): array
@@ -32,7 +34,6 @@ class Wallet extends Model
         return [
             'id' => 'integer',
             'owner_type' => 'string',
-            'owner_id' => 'integer',
             'balance' => config('wallet.amounts') === 'integer' ? 'integer' : 'double',
         ];
     }
